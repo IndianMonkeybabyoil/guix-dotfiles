@@ -122,5 +122,4 @@ EOF
 
 # 7. Initialize and Kick-off Installation
 guix system init /mnt/etc/config.scm /mnt
-echo "Installation complete. Rebooting..."
 reboot
