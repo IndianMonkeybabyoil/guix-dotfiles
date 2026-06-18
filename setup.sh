@@ -1,8 +1,13 @@
-#!/bin/zsh
-
+#!/bin/sh
 set -e
 
-cat << EOF > ~/.zprofile
+# 1. Clone Oh My Zsh FIRST so files exist when configuration initializes
+if [ ! -d "$HOME/.oh-my-zsh" ]; then
+    git clone https://github.com/ohmyzsh/ohmyzsh.git ~/.oh-my-zsh
+fi
+
+# 2. Write the declarative profile configuration
+cat << 'EOF' > ~/.zprofile
 if [ -f ~/.guix-profile/etc/profile ]; then
   . ~/.guix-profile/etc/profile
 fi
@@ -12,7 +17,8 @@ if [ -f ~/.config/guix/current/etc/profile ]; then
 fi
 EOF
 
-cat << EOF > ~/home-configuration.scm
+# 3. Create Home Configuration file
+cat << 'EOF' > ~/home-configuration.scm
 (define-module (home-config)
   #:use-module (gnu home)
   #:use-module (gnu home services)
@@ -36,12 +42,12 @@ cat << EOF > ~/home-configuration.scm
    (service home-zsh-service-type
             (home-zsh-configuration
              (zshrc (list (plain-file "zshrc" "
-export ZSH=\$HOME/.oh-my-zsh
+export ZSH=$HOME/.oh-my-zsh
 ZSH_THEME=\"robbyrussell\"
-plugins=(git zsh-autosuggestions)
+plugins=(git)
 
-if [ -f \$ZSH/oh-my-zsh.sh ]; then
-  source \$ZSH/oh-my-zsh.sh
+if [ -f $ZSH/oh-my-zsh.sh ]; then
+  source $ZSH/oh-my-zsh.sh
 fi
 
 if [ -f ~/.zprofile ]; then
@@ -54,13 +60,12 @@ fi
               ("ELECTRON_OZONE_PLATFORM_HINT" . "auto"))))))
 EOF
 
+# 4. Initialize user space configuration via Guix Home
 guix home reconfigure ~/home-configuration.scm
 
-git clone https://github.com/ohmyzsh/ohmyzsh.git ~/.oh-my-zsh
-
+# 5. Populate Wayland/Hyprland configuration directories
 mkdir -p ~/.config/kitty
-
-cat << EOF > ~/.config/kitty/kitty.conf
+cat << 'EOF' > ~/.config/kitty/kitty.conf
 font_family      JetBrains Mono
 font_size        11.0
 background_opacity 0.85
@@ -69,8 +74,7 @@ enable_audio_bell no
 EOF
 
 mkdir -p ~/.config/hypr
-
-cat << EOF > ~/.config/hypr/hyprland.conf
+cat << 'EOF' > ~/.config/hypr/hyprland.conf
 exec-once = lspci | grep -qi nvidia && hyprctl setenv LIBVA_DRIVER_NAME nvidia
 exec-once = lspci | grep -qi nvidia && hyprctl setenv GBM_BACKEND nvidia-drm
 exec-once = lspci | grep -qi nvidia && hyprctl setenv __GLX_VENDOR_LIBRARY_NAME nvidia
@@ -136,6 +140,3 @@ bind = SUPER SHIFT, 2, movetoworkspace, 2
 bind = SUPER SHIFT, 3, movetoworkspace, 3
 bind = SUPER SHIFT, 4, movetoworkspace, 4
 EOF
-
-source ~/.zprofile
-Hyprland
