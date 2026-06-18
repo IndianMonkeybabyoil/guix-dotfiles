@@ -181,6 +181,19 @@ CONFIG
 
 # ── Install ────────────────────────────────────────────────────────────────────
 echo "==> Running guix system init — this is the long part..."
+
+# 1. Create a temporary channels file that includes nonguix
+mkdir -p ~/.config/guix
+cat <<EOF > ~/.config/guix/channels.scm
+(cons* (channel
+        (name 'nonguix)
+        (url "https://gitlab.com/nonguix/nonguix"))
+       %default-channels)
+EOF
+
+# 2. Update the installer environment to recognize nonguix packages
+guix pull
+
 guix system init /mnt/etc/config.scm /mnt
 
 echo ""
