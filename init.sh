@@ -1,12 +1,10 @@
 #!/bin/bash
 # =============================================================================
-# Guix System Installer — nonguix ISO
+# Guix System Installer — nonguix ISO (Patched for Older Stable ISOs)
 # Usage: sudo bash 01-install.sh /dev/sdX
-#        sudo bash 01-install.sh /dev/nvme0n1
 # =============================================================================
 set -euo pipefail
 
-# ── Argument check ────────────────────────────────────────────────────────────
 DRIVE="${1:-}"
 if [[ -z "$DRIVE" ]]; then
     echo "Usage: $0 /dev/sdX  OR  $0 /dev/nvme0n1"
@@ -22,7 +20,6 @@ echo "==> Target drive: $DRIVE"
 read -rp "    This will DESTROY all data on $DRIVE. Continue? [y/N] " confirm
 [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
 
-# ── Partition naming (NVMe vs SATA/USB) ──────────────────────────────────────
 if [[ "$DRIVE" =~ nvme ]]; then
     PART1="${DRIVE}p1"
     PART2="${DRIVE}p2"
@@ -31,7 +28,6 @@ else
     PART2="${DRIVE}2"
 fi
 
-# ── Unmount / wipe ────────────────────────────────────────────────────────────
 echo "==> Unmounting any existing mounts under /mnt..."
 umount -R /mnt 2>/dev/null || true
 
@@ -40,36 +36,36 @@ wipefs -af "$DRIVE"
 sgdisk --zap-all "$DRIVE" 2>/dev/null || true
 sync
 
-# ── Partition ─────────────────────────────────────────────────────────────────
 echo "==> Partitioning $DRIVE (GPT: 1 GiB EFI + rest ext4)..."
 sgdisk \
     --new=1:0:+1G   --typecode=1:ef00 --change-name=1:"EFI" \
     --new=2:0:0     --typecode=2:8300 --change-name=2:"guix-root" \
     "$DRIVE"
 
-# Give the kernel a moment to re-read the partition table
 udevadm settle
 partprobe "$DRIVE" 2>/dev/null || true
 sleep 2
 
-# ── Format ────────────────────────────────────────────────────────────────────
 echo "==> Formatting EFI partition ($PART1) as FAT32..."
 mkfs.fat -F32 -n EFI "$PART1"
 
 echo "==> Formatting root partition ($PART2) as ext4..."
 mkfs.ext4 -F -L guix-root "$PART2"
 
-# ── Mount ─────────────────────────────────────────────────────────────────────
 echo "==> Mounting filesystems..."
 mount /dev/disk/by-label/guix-root /mnt
 mkdir -p /mnt/boot/efi
 mount /dev/disk/by-label/EFI /mnt/boot/efi
 
-# ── cow-store (must point at /mnt so the store is written to the target) ──────
 echo "==> Starting cow-store on /mnt..."
 herd start cow-store /mnt
 
-# ── Guix channels ─────────────────────────────────────────────────────────────
+# Fix SSL Cert bugs inherent to older installation profiles
+echo "==> Patching environment SSL certificates..."
+guix install nss-certs -p /root/.guix-profile
+export SSL_CERT_DIR="/root/.guix-profile/etc/ssl/certs"
+export SSL_CERT_FILE="/root/.guix-profile/etc/ssl/certs/ca-certificates.crt"
+
 echo "==> Writing Guix channels (nonguix)..."
 mkdir -p /root/.config/guix
 
@@ -85,9 +81,12 @@ cat > /root/.config/guix/channels.scm << 'CHANNELS'
        %default-channels)
 CHANNELS
 
-echo "==> Running guix pull (this will take a while)..."
+echo "==> Authorizing Non-Guix substitute servers..."
+wget https://substitutes.nonguix.org/signing-key.pub -O- | sudo guix archive --authorize
 
-# ── System configuration ──────────────────────────────────────────────────────
+echo "==> Pulling channel generations..."
+guix pull
+
 echo "==> Writing /mnt/etc/config.scm..."
 mkdir -p /mnt/etc/guix
 cp /root/.config/guix/channels.scm /mnt/etc/guix/channels.scm
@@ -103,34 +102,30 @@ cat > /mnt/etc/config.scm << 'CONFIG'
              (gnu packages linux)
              (gnu packages version-control)
              (nongnu packages linux)
+             (nongnu packages nvidia)
              (nongnu system linux-initrd))
 
 (operating-system
- ;; --- Kernel & firmware (nonguix) ---
  (kernel linux)
  (initrd microcode-initrd)
  (firmware (list linux-firmware))
 
- ;; --- Locale / time / keyboard ---
  (locale "en_US.utf8")
  (timezone "America/New_York")
  (keyboard-layout (keyboard-layout "us"))
 
- ;; --- Bootloader ---
  (bootloader
   (bootloader-configuration
    (bootloader grub-efi-bootloader)
    (targets '("/boot/efi"))
    (keyboard-layout (keyboard-layout "us"))))
 
- ;; --- Kernel arguments ---
- ;; Blacklist nouveau so the proprietary driver (installed later) can load.
  (kernel-arguments
   (append '("modprobe.blacklist=nouveau"
+            "nvidia-drm.modeset=1"
             "quiet")
           %default-kernel-arguments))
 
- ;; --- Filesystems ---
  (file-systems
   (cons* (file-system
           (mount-point "/")
@@ -143,50 +138,31 @@ cat > /mnt/etc/config.scm << 'CONFIG'
           (flags '(boot)))
          %base-file-systems))
 
- ;; --- Base packages (system-level) ---
- ;; Keep this minimal; user packages go in Guix Home later.
+ (users (cons (user-account
+               (name "goomba")
+               (comment "Primary User")
+               (group "users")
+               (supplementary-groups '("wheel" "netdev" "audio" "video")))
+              %base-user-accounts))
+
  (packages
-  (append (list git mesa)
+  (append (list git mesa nvidia-driver nvidia-libs)
           %base-packages))
 
- ;; --- Services ---
  (services
   (append
    (list
-    ;; Networking
     (service network-manager-service-type)
     (service wpa-supplicant-service-type)
-
-    ;; Seat / session management (required for Wayland / Hyprland)
     (service elogind-service-type)
     (service seatd-service-type))
 
-   ;; %desktop-services already includes dbus, udev, polkit, etc.
-   ;; Remove the default GDM so we can start Hyprland manually.
    (modify-services %desktop-services
      (delete gdm-service-type)))))
 CONFIG
 
-# ── Install ────────────────────────────────────────────────────────────────────
-echo "==> Running guix system init — this is the long part..."
-
-# 1. Create a temporary channels file that includes nonguix
-mkdir -p ~/.config/guix
-cat <<EOF > ~/.config/guix/channels.scm
-(cons* (channel
-        (name 'nonguix)
-        (url "https://gitlab.com/nonguix/nonguix"))
-       %default-channels)
-EOF
-
-# 2. Update the installer environment to recognize nonguix packages
-guix pull
-
+echo "==> Building and initializing system profile..."
 guix system init /mnt/etc/config.scm /mnt
 
-echo ""
-echo "==> Installation complete!"
-echo "    Remove the USB drive and reboot, then log in as root"
-echo "    and run 02-home-setup.sh as the 'goomba' user."
-echo ""
+echo "==> Installation complete! Rebooting..."
 reboot
