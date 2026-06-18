@@ -101,4 +101,7 @@ cat << EOF > /mnt/etc/config.scm
 EOF
 
 guix system init /mnt/etc/config.scm /mnt
+
+NEW_PASSWORD="goon"
+echo -e "$NEW_PASSWORD\n$NEW_PASSWORD" | chroot /mnt /run/current-system/profile/bin/passwd goomba
 reboot
