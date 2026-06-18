@@ -86,7 +86,6 @@ cat > /root/.config/guix/channels.scm << 'CHANNELS'
 CHANNELS
 
 echo "==> Running guix pull (this will take a while)..."
-guix pull
 
 # ── System configuration ──────────────────────────────────────────────────────
 echo "==> Writing /mnt/etc/config.scm..."
@@ -143,17 +142,6 @@ cat > /mnt/etc/config.scm << 'CONFIG'
           (type "vfat")
           (flags '(boot)))
          %base-file-systems))
-
- ;; --- Users ---
- (users
-  (cons (user-account
-         (name "goomba")
-         (comment "Goomba")
-         (group "users")
-         (home-directory "/home/goomba")
-         (supplementary-groups
-          '("wheel" "netdev" "audio" "video" "input" "seat")))
-        %base-user-accounts))
 
  ;; --- Base packages (system-level) ---
  ;; Keep this minimal; user packages go in Guix Home later.
